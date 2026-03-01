@@ -1,72 +1,94 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 
+/**
+ * protect — Verify JWT and attach req.user from MongoDB.
+ * Rejects unauthenticated requests with 401.
+ */
 export const protect = async (req, res, next) => {
   try {
-    let token;
+    const authHeader = req.headers.authorization;
 
-    // Check for token in Authorization header
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, error: 'No token provided' });
     }
 
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: 'Not authorized, no token provided'
-      });
+    const token = authHeader.replace('Bearer ', '');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    const user = await User.findById(decoded.userId);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'User not found' });
     }
 
-    try {
-      // Verify token
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-      // Get user from token
-      req.user = await User.findById(decoded.id).select('-otpSecret -otpExpiry');
-
-      if (!req.user) {
-        return res.status(401).json({
-          success: false,
-          message: 'User not found'
-        });
-      }
-
-      next();
-    } catch (error) {
-      return res.status(401).json({
-        success: false,
-        message: 'Not authorized, token invalid or expired'
-      });
-    }
+    req.user = user;
+    req.userId = decoded.userId;
+    req.userPhone = decoded.phone;
+    next();
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: 'Server error in authentication'
-    });
+    console.error('Auth middleware error:', error.message);
+
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ success: false, error: 'Token expired' });
+    }
+
+    res.status(401).json({ success: false, error: 'Invalid token' });
   }
 };
 
-// Optional authentication - doesn't fail if no token
+/**
+ * optionalAuth — Same as protect but does NOT reject unauthenticated requests.
+ * If valid token is present, attaches req.user. Otherwise continues without it.
+ */
 export const optionalAuth = async (req, res, next) => {
   try {
-    let token;
+    const authHeader = req.headers.authorization;
 
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return next();
     }
 
-    if (token) {
-      try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = await User.findById(decoded.id).select('-otpSecret -otpExpiry');
-      } catch (error) {
-        // Token invalid, but don't fail - just proceed without user
-        req.user = null;
-      }
+    const token = authHeader.replace('Bearer ', '');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    const user = await User.findById(decoded.userId);
+    if (user) {
+      req.user = user;
+      req.userId = decoded.userId;
+      req.userPhone = decoded.phone;
+    }
+  } catch {
+    // Token invalid or expired — continue without auth
+  }
+
+  next();
+};
+
+/**
+ * verifyToken — Lightweight JWT verification (no DB lookup).
+ * Kept for backward compatibility.
+ */
+export const verifyToken = (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'No token provided' });
     }
 
+    const token = authHeader.replace('Bearer ', '');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    req.userId = decoded.userId;
+    req.userPhone = decoded.phone;
     next();
   } catch (error) {
-    next();
+    console.error('Token verification error:', error.message);
+
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Token expired' });
+    }
+
+    res.status(401).json({ error: 'Invalid token' });
   }
 };
