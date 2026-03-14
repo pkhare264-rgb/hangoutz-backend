@@ -27,11 +27,17 @@ import notificationRoutes from './routes/notifications.js';
 dotenv.config();
 
 // Validate required environment variables
-const requiredEnvVars = ['MONGODB_URI', 'JWT_SECRET', 'CLIENT_URL'];
+const requiredEnvVars = ['MONGODB_URI', 'JWT_SECRET'];
+const optionalEnvVars = ['CLIENT_URL'];
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {
     logger.error(`Missing required environment variable: ${envVar}`);
     process.exit(1);
+  }
+}
+for (const envVar of optionalEnvVars) {
+  if (!process.env[envVar]) {
+    logger.warn(`Missing optional environment variable: ${envVar} — using defaults`);
   }
 }
 
